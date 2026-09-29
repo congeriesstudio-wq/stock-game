@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, ArrowDownRight, ArrowRight, ArrowUpRight, Bell, Check, ChevronDown, ChevronRight, CircleHelp, Clock3, Command, Compass, Eye, EyeOff, Gem, LayoutDashboard, LogOut, Menu, MoreHorizontal, Plus, Search, ShieldCheck, Sparkles, Star, TrendingUp, Trophy, Wallet, X, Zap } from 'lucide-react';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import { mockApi } from './services/mockApi';
 import type { GameState, Holding, Player, PortfolioMetrics, Stock, Trade } from './types';
 import { PortfolioChart, StockChart } from './components/Charts';
@@ -113,6 +114,7 @@ function App() {
     </main>
     {tradeTarget && <TradeModal stock={tradeTarget.stock} side={tradeTarget.side} cash={cash} owned={holdings.find(h=>h.symbol===tradeTarget.stock.symbol)?.quantity ?? 0} onClose={()=>setTradeTarget(null)} onConfirm={executeTrade}/>}
     {notice && <Toast notice={notice} close={()=>setNotice(null)}/>}
+    <SpeedInsights />
   </div>;
 }
 

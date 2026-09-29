@@ -1,9 +1,20 @@
 {
-  "name": "ticker-arena-frontend",
+  "name": "stock-game-backend",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.1.0",
   "type": "module",
-  "scripts": { "dev": "vite --host 0.0.0.0", "build": "tsc -b && vite build", "preview": "vite preview --host 0.0.0.0" },
-  "dependencies": { "@vitejs/plugin-react": "latest", "vite": "latest", "typescript": "latest", "react": "latest", "react-dom": "latest", "lucide-react": "^0.468.0" },
-  "devDependencies": { "@types/react": "latest", "@types/react-dom": "latest" }
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "dev": "npx --yes vercel@61.0.0 dev"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.11"
+  }
 }

@@ -1,33 +1,27 @@
-# Ticker Arena frontend
+# Stock Trading Game Backend
 
-A responsive React + TypeScript stock-market game UI built with Vite. Run `npm install && npm run dev` for local development; run `npm run build` for a production type-check and build.
+Supabase/PostgreSQL backend and Vercel TypeScript API for a virtual-cash stock trading game.
 
-## Current development mode
+## Quick start
 
-The UI currently starts in a seeded demo dashboard so the gameplay screens can be reviewed immediately. **All sample stocks, holdings, trades, portfolio metrics/history, game state, player rankings, and simulated trading behavior are isolated in `src/services/mockApi.ts`.** Replace this module with the backend team's API/server-action adapter before shipping. It is deliberately not a Supabase client and contains no credentials.
+1. Install Node.js 20+, Docker, and the Supabase CLI.
+2. Run `npm install` and `npx supabase start`.
+3. Copy `.env.example` to `.env.local`. Set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` from the local Supabase status output. Set `CRON_SECRET` to a long random value.
+4. Run `npx supabase db reset` to apply migrations and seeded demo data.
+5. Run `npm run dev` to serve API routes locally.
+6. Run `npm test` and `npm run typecheck`.
 
-Important transaction rule: displayed totals are estimates for presentation only. The UI submits `{ symbol, side, quantity }` to `submitTrade`; a successful server response should provide authoritative cash/holding/trade state. Never accept a client-computed trade total or mutate database state directly from components.
+See [Backend & Frontend API Guide](docs/BACKEND.md) for schema relationships, RLS, environment setup, authentication, endpoints and error contracts, quote-provider design, deployment, and integration test instructions.
 
-## Frontend structure
+## Main routes
 
-- `src/App.tsx` — application shell, navigation, page composition, and UI state
-- `src/components/Charts.tsx` — responsive SVG portfolio and stock charts
-- `src/services/mockApi.ts` — isolated mock data and trade adapter
-- `src/types.ts` — shared stock, holding, trade, and leaderboard contracts
-- `src/styles.css`, `src/landing.css` — responsive dark market UI and public landing/auth pages
+- `POST /api/seasons/join`
+- `POST /api/trades`
+- `GET /api/seasons/leaderboard?seasonId=<uuid>`
+- Scheduler-only `POST /api/market/refresh`
 
-## Backend adapter expectations
+All account and portfolio operations are server-validated. Trade execution uses a locked, atomic PostgreSQL function with database-level idempotency. Browser roles cannot write financial tables or invoke privileged trade RPCs.
 
-Keep the mock API method shapes or update the call sites and shared types together:
+## Branch
 
-- `getStocks()` — authorized/searchable instruments and quote data
-- `getPortfolio()` — authoritative cash, holdings (including market value/P&L/allocation fields), account metrics, recent trades, and portfolio-history points for the authenticated user
-- `getLeaderboard()` — rankings and game metric for the active season
-- `getGameState()` — active season metadata, player rank, level, streak, and participation counts
-- `submitTrade({ symbol, side, quantity })` — validated server-side execution; return the authoritative trade outcome plus updated cash, holdings, metrics, trades, and history (or a typed error) so the client doesn't need an unsafe second request
-
-Auth is a demo-only form flow; wire `AuthScreen` to the backend auth provider and handle session restoration, expiry, and logout server-side. Watchlist state is currently local demo state; replace it with the user's persisted watchlist endpoint. Do not add Supabase service-role credentials to this client app.
-
-## Included UX
-
-Overview, portfolio/allocation, stock discovery/details, buy/sell confirmation flow, season leaderboard, landing page, login/sign-up screens, loading skeletons, empty states, error/success toasts, keyboard shortcuts (`⌘/Ctrl+K`, `N`, `Escape`), and responsive layouts.
+Implementation branch: `backend/supabase-trading`.

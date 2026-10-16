@@ -40,6 +40,14 @@ The same Vite/React frontend ships as a website (Vercel) and an installable Andr
 
 Tokens are stored via `src/services/tokenStorage.ts`: Android Keystore-backed secure storage on device, `localStorage` in browsers. Use `apiFetch` (`src/services/apiClient.ts`) for API calls so the base URL and bearer token are applied.
 
+### Connect to Supabase (required for a live app)
+The UI talks to Supabase directly for sign-up/login and read-only data (RLS-protected), and to the Vercel API for joining a season, trading and the leaderboard. If `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` are unset the web app falls back to the built-in demo (mock) data.
+1. **Database:** in Supabase → SQL Editor run `supabase/migrations/202609290001_initial_schema.sql`, then `supabase/seed/seed.sql` (creates the demo season, assets and quotes). Or via CLI: `npx supabase link --project-ref hqrhfdrrrboptihwctwb && npx supabase db push`, then run the seed SQL.
+2. **Auth:** Supabase → Authentication → Providers → Email enabled. For instant sign-in turn off "Confirm email", otherwise users must confirm via email before logging in.
+3. **Vercel env vars:** `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET` (server) and `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (client build). Redeploy.
+4. **Quote refresh:** trades fail with `quote_stale` if quotes are older than 15 minutes. Add repo secrets `APP_URL` (your Vercel URL) and `CRON_SECRET`; the **Refresh simulated quotes** workflow calls `/api/market/refresh` every 10 minutes (it can also be run manually).
+5. **Android:** add repo Actions variables `VITE_API_BASE_URL` (Vercel URL), `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, then run the **Android debug APK** workflow.
+
 ### Web local dev
 `npm install`, then `npm run dev` (frontend, http://localhost:5173) and `npm run dev:api` (Vercel API routes).
 
@@ -69,4 +77,3 @@ Manual checklist (web and the installed APK):
 2. API CORS: `curl -i -X OPTIONS <API>/api/trades -H "Origin: https://localhost" -H "Access-Control-Request-Method: POST"` returns `204` with `Access-Control-Allow-Origin: https://localhost`.
 3. Android: install the APK, log in (session persists after force-close), confirm markets/leaderboard load (`GET /api/seasons/leaderboard`), and submit a buy and sell (`POST /api/trades`); verify they appear in the portfolio.
 
-Note: the current UI still uses the development `mockApi` adapter; switch it to `apiFetch` calls when wiring the real backend.

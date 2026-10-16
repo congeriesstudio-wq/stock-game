@@ -1,11 +1,13 @@
 import { timingSafeEqual } from 'node:crypto';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { handleCors } from '../../src/lib/cors.js';
 import { createAdminClient } from '../../src/lib/server-auth.js';
 import { json, methodNotAllowed } from '../../src/lib/http.js';
 
 // Intended for a trusted scheduler only. Set CRON_SECRET in Vercel and invoke with
 // Authorization: Bearer <CRON_SECRET>; never expose it in the frontend.
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (handleCors(req, res)) return;
   if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);
   const expected = process.env.CRON_SECRET ?? '';
   const supplied = req.headers.authorization?.replace(/^Bearer\s+/i, '') ?? '';

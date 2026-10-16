@@ -1,8 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { handleCors } from '../../src/lib/cors.js';
 import { authenticate, json, methodNotAllowed } from '../../src/lib/http.js';
 import { z } from 'zod';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (handleCors(req, res)) return;
   if (req.method !== 'GET') return methodNotAllowed(res, ['GET']);
   const auth = await authenticate(req, res);
   if (!auth) return;

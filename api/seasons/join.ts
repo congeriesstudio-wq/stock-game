@@ -1,9 +1,11 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { handleCors } from '../../src/lib/cors.js';
 import { authenticate, json, methodNotAllowed } from '../../src/lib/http.js';
 import { createAdminClient } from '../../src/lib/server-auth.js';
 import { joinSeasonSchema } from '../../src/lib/validation.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (handleCors(req, res)) return;
   if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);
   const auth = await authenticate(req, res);
   if (!auth) return;

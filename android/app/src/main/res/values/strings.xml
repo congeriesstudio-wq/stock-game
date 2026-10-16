@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Ticker Arena</string>
+    <string name="title_activity_main">Ticker Arena</string>
+    <string name="package_name">com.congeriesstudio.stockgame</string>
+    <string name="custom_url_scheme">com.congeriesstudio.stockgame</string>
+</resources>

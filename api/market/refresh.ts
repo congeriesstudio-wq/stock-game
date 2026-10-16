@@ -2,11 +2,12 @@ import { timingSafeEqual } from 'node:crypto';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createAdminClient } from '../../src/lib/server-auth.js';
 import { json, methodNotAllowed } from '../../src/lib/http.js';
+import { refreshSimulatedQuotes } from '../../src/prices/refresh.js';
 
-// Intended for a trusted scheduler only. Set CRON_SECRET in Vercel and invoke with
-// Authorization: Bearer <CRON_SECRET>; never expose it in the frontend.
+// Trusted scheduler only. Vercel Cron uses GET; a manual scheduler may POST.
+// Set CRON_SECRET and send Authorization: Bearer <CRON_SECRET>. Never expose it in the frontend.
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);
+  if (req.method !== 'POST' && req.method !== 'GET') return methodNotAllowed(res, ['GET', 'POST']);
   const expected = process.env.CRON_SECRET ?? '';
   const supplied = req.headers.authorization?.replace(/^Bearer\s+/i, '') ?? '';
   const expectedBuffer = Buffer.from(expected);
@@ -16,20 +17,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   try {
     const admin = createAdminClient();
-    const { data: quotes, error: readError } = await admin.from('asset_quotes').select('symbol,price');
-    if (readError || !quotes?.length) return json(res, 503, { error: { code: 'quote_unavailable', message: 'No simulated prices are initialized.' } });
-    const quotedAt = new Date().toISOString();
-    const updates = quotes.map((quote) => {
-      // Bounded random walk: each refresh moves the simulated market at most +/-0.2%.
-      const next = Math.max(0.01, Number(quote.price) * (1 + (Math.random() - 0.5) * 0.004));
-      return { symbol: quote.symbol, price: next.toFixed(6), quoted_at: quotedAt, source: 'simulated' };
-    });
-    const { data, error } = await admin.rpc('publish_quotes', { p_quotes: updates });
-    if (error) {
-      console.error('quote_publish_error', error);
+    const refreshed = await refreshSimulatedQuotes(admin);
+    if (!refreshed.ok) {
+      if (refreshed.reason === 'quote_unavailable') return json(res, 503, { error: { code: 'quote_unavailable', message: 'No simulated prices are initialized.' } });
+      console.error('quote_publish_error', refreshed.error);
       return json(res, 500, { error: { code: 'quote_publish_failed', message: 'Could not publish simulated prices.' } });
     }
-    return json(res, 200, { data: { updated: data, quotedAt, source: 'simulated' } });
+    return json(res, 200, { data: { updated: refreshed.updated, quotedAt: refreshed.quotedAt, source: 'simulated' } });
   } catch (error) {
     console.error('market_refresh_error', error);
     return json(res, 500, { error: { code: 'internal_error', message: 'Market refresh is temporarily unavailable.' } });

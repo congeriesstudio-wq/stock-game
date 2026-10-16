@@ -1,4 +1,5 @@
 import type { GameState, Holding, Player, PortfolioMetrics, Stock, Trade, TradeRequest, TradeResult } from '../types';
+import { MIN_BUY_NOTIONAL, formatQuantity, orderTotal, roundCash } from '../lib/money';
 
 // Development adapter only. Replace this module with typed fetch/server-action calls when the API is ready.
 // Never treat client-calculated estimates as authoritative; trade() is the only source of transaction outcomes.
@@ -20,9 +21,26 @@ let trades: Trade[] = [
   { id: 't3', symbol: 'TSLA', side: 'buy', quantity: 6, price: 319.72, date: 'Yesterday, 11:08 AM' },
 ];
 const mockHistory = [100000, 99760, 100420, 100210, 101150, 100940, 102430, 101980, 103150, 102840, 104110, 103760, 105020, 104880, 105610, 105240, 105529];
+const dayEligible: Record<string, number> = { NVDA: 60, AAPL: 60, TSLA: 30, MSFT: 20 };
+function seriesDates(length: number) {
+  const end = new Date();
+  end.setHours(12, 0, 0, 0);
+  return Array.from({ length }, (_, index) => {
+    const date = new Date(end);
+    date.setDate(end.getDate() - (length - 1 - index));
+    return date.toISOString();
+  });
+}
+const mockDates = seriesDates(mockHistory.length);
+function tradeStamp(date = new Date()) {
+  return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
 function getMetrics(): PortfolioMetrics {
   const investedValue = holdings.reduce((sum, holding) => sum + holding.quantity * (stockRows.find(stock => stock.symbol === holding.symbol)?.price ?? holding.avgCost), 0);
-  const dailyGainLoss = holdings.reduce((sum, holding) => sum + holding.quantity * (stockRows.find(stock => stock.symbol === holding.symbol)?.change ?? 0), 0);
+  const dailyGainLoss = holdings.reduce((sum, holding) => {
+    const eligible = Math.min(holding.quantity, dayEligible[holding.symbol] ?? 0);
+    return sum + eligible * (stockRows.find(stock => stock.symbol === holding.symbol)?.change ?? 0);
+  }, 0);
   const totalValue = cash + investedValue;
   const totalGainLoss = totalValue - 100000;
   return { totalValue, totalGainLoss, totalReturnPct: totalGainLoss / 100000 * 100, dailyGainLoss, investedValue, cashAllocationPct: totalValue ? cash / totalValue * 100 : 0, startingBalance: 100000 };
@@ -38,15 +56,15 @@ function getEnrichedHoldings(): Holding[] {
   });
 }
 export const mockApi = {
-  async getStocks(): Promise<Stock[]> { await delay(350); return stockRows; },
-  async getPortfolio() { await delay(520); return { cash, holdings: getEnrichedHoldings(), trades: [...trades], metrics: getMetrics(), history: [...mockHistory] }; },
-  async getGameState(): Promise<GameState> { await delay(300); return { seasonNumber: 4, seasonName: 'The Fall Rally', daysRemaining: 12, endsOn: 'Oct 11', playerLevel: 12, playerTitle: 'Day trader', streakDays: 5, rank: 4, playerCount: 1284, startingBalance: 100000 }; },
+  async getStocks(): Promise<Stock[]> { await delay(350); return stockRows.map(stock => ({ ...stock, active: true, historyDates: seriesDates(stock.history.length) })); },
+  async getPortfolio() { await delay(520); return { cash, holdings: getEnrichedHoldings(), trades: [...trades], metrics: getMetrics(), history: [...mockHistory], historyDates: [...mockDates] }; },
+  async getGameState(): Promise<GameState> { await delay(300); const end = new Date(); end.setDate(end.getDate() + 12); return { seasonNumber: 4, seasonName: 'The Fall Rally', daysRemaining: 12, endsOn: end.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), playerLevel: 12, playerTitle: 'Day trader', streakDays: 5, rank: 4, playerCount: 5, startingBalance: 100000 }; },
   async getLeaderboard(): Promise<Player[]> { await delay(400); return [
     { rank: 1, name: 'MarketMaven', initials: 'MM', value: 132480, returnPct: 32.48 },
     { rank: 2, name: 'bullish.ben', initials: 'BB', value: 128720, returnPct: 28.72 },
     { rank: 3, name: 'Olivia C.', initials: 'OC', value: 109360, returnPct: 9.36 },
     { rank: 4, name: 'Jordan Davis', initials: 'JD', value: 105529, returnPct: 5.53, you: true },
-    { rank: 5, name: 'chartwizard', initials: 'CW', value: 102210, returnPct: 2.21 },
+    { rank: 5, name: 'chartwizard', initials: 'CW', value: 97790, returnPct: -2.21 },
   ]; },
   async submitTrade(req: TradeRequest): Promise<TradeResult> {
     await delay(800);
@@ -54,20 +72,25 @@ export const mockApi = {
     if (!stock) throw new Error('We could not find that stock. Please refresh and try again.');
     const holding = holdings.find(h => h.symbol === req.symbol);
     const available = req.side === 'buy' ? cash : (holding?.quantity ?? 0);
-    if (!Number.isInteger(req.quantity) || req.quantity <= 0) throw new Error('Enter a whole number of shares greater than zero.');
-    if (req.side === 'buy' && req.quantity * stock.price > cash) throw new Error('Not enough available cash for this trade.');
-    if (req.side === 'sell' && req.quantity > available) throw new Error(`You only have ${available} shares available to sell.`);
-    const trade: Trade = { id: `t${Date.now()}`, symbol: req.symbol, side: req.side, quantity: req.quantity, price: stock.price, date: 'Just now' };
+    if (!(req.quantity > 0) || Number(formatQuantity(req.quantity)) !== Number(req.quantity.toFixed(6))) throw new Error('Enter a share quantity greater than zero, with at most 6 decimal places.');
+    const liquidateAll = req.side === 'sell' && !!holding && req.quantity === holding.quantity;
+    const total = orderTotal(req.side, req.quantity, stock.price, liquidateAll);
+    if (req.side === 'buy' && total < MIN_BUY_NOTIONAL) throw new Error('Minimum buy is $1.00.');
+    if (req.side === 'buy' && total > cash) throw new Error('Not enough available cash for this trade.');
+    if (req.side === 'sell' && req.quantity > available) throw new Error(`You only have ${formatQuantity(available)} shares available to sell.`);
+    if (req.side === 'sell' && total < 0.01 && !liquidateAll) throw new Error('That sale is below $0.01. Sell the rest of the position or increase the quantity.');
+    const trade: Trade = { id: `t${Date.now()}`, symbol: req.symbol, side: req.side, quantity: req.quantity, price: stock.price, date: tradeStamp() };
     if (req.side === 'buy') {
-      cash -= req.quantity * stock.price;
+      cash = roundCash(cash - total);
       if (holding) { const quantity = holding.quantity + req.quantity; holding.avgCost = (holding.avgCost * holding.quantity + stock.price * req.quantity) / quantity; holding.quantity = quantity; }
       else holdings.push({ symbol: req.symbol, quantity: req.quantity, avgCost: stock.price });
     } else {
-      cash += req.quantity * stock.price;
+      cash = roundCash(cash + total);
+      dayEligible[req.symbol] = Math.max(0, (dayEligible[req.symbol] ?? 0) - req.quantity);
       if (holding) holding.quantity -= req.quantity;
       holdings = holdings.filter(h => h.quantity > 0);
     }
     trades = [trade, ...trades].slice(0, 12);
-    return { trade, cash, holding: getEnrichedHoldings().find(h => h.symbol === req.symbol) ?? null, metrics: getMetrics(), holdings: getEnrichedHoldings(), trades: [...trades], history: [...mockHistory] };
+    return { trade, cash, holding: getEnrichedHoldings().find(h => h.symbol === req.symbol) ?? null, metrics: getMetrics(), holdings: getEnrichedHoldings(), trades: [...trades], history: [...mockHistory], historyDates: [...mockDates] };
   },
 };

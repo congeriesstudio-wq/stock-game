@@ -1,6 +1,6 @@
 # Stock game backend
 
-A Supabase-backed, Vercel-hosted TypeScript backend. This repository contains no frontend. Browser clients may use the Supabase **publishable/anon key** for Auth and RLS-protected reads; trades and season enrollment go through the Vercel API. The service-role key is server-only.
+A Supabase-backed, Vercel-hosted TypeScript backend with a Vite UI. Browser clients may use the Supabase **publishable/anon key** for Auth and RLS-protected reads; trades and season enrollment go through the Vercel API. The service-role key is server-only. Without `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, the UI runs a local demo portfolio and does not call Supabase.
 
 ## Repository / Git
 
@@ -18,7 +18,7 @@ Work was initialized on branch `backend/supabase-trading`. The repo is designed 
 - RLS permits self profile and own portfolio/balance/holding/trade/ledger reads. Public-to-authenticated market and season reference data is read-only. Leaderboard output intentionally publishes display name and current marked-to-market portfolio value, not individual positions or cash.
 - Price values are trusted only when written by the server/scheduler. The initial adapter reads simulated quotes in Supabase; implement `StockPriceProvider` for a real vendor later and route trusted quote ingestion through `publish_quotes` or another server-only publisher.
 
-`average_cost` is maintained as quantity-weighted average purchase price for display/analytics. No brokerage fees, shorting, leverage, fractional-cent cash, or extended-hours behavior is implemented. Quantity supports up to six decimal places; cash and trade totals round to cents. Game performance is cash plus current quote value of holdings.
+`average_cost` is maintained as quantity-weighted average purchase price for display/analytics. No brokerage fees, shorting, leverage, fractional-cent cash, or extended-hours behavior is implemented. Quantity supports up to six decimal places. Buys round the total up to the next cent and require at least $1. Sells round down. Selling an entire dust position whose proceeds floor to $0 settles at $0.01 so the holding can be removed. Deactivated assets can still be sold when the player holds them. Game performance is cash plus current quote value of holdings.
 
 ## Local setup
 
@@ -30,12 +30,13 @@ cp .env.example .env.local
 # Fill in local Supabase URL, anon key, and service-role key in .env.local
 npx supabase start
 npx supabase db reset       # applies migrations and configured seed data
-npm run dev                 # Vercel dev; API routes run at http://localhost:3000/api/...
+npm run dev:api             # Vercel dev; API routes run at http://localhost:3000/api/...
+npm run dev                 # Vite UI at http://localhost:5173
 ```
 
 For Vercel, configure `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and `QUOTE_MAX_AGE_SECONDS`. Set `CRON_SECRET` for the simulated price refresh endpoint. Set `SUPABASE_SERVICE_ROLE_KEY` only in server-side Vercel environment variables; do not prefix it with `NEXT_PUBLIC_`/`VITE_` or send it to a browser.
 
-Seed creates a demo active season, AAPL/MSFT/NVDA/TSLA/GOOGL and simulated quotes/history. It is not real market data. The quote refresh endpoint makes a bounded random walk and writes prices/history atomically. Invoke `POST /api/market/refresh` using `Authorization: Bearer <CRON_SECRET>` from a trusted scheduler (e.g. every few minutes); it is not configured as a Vercel Cron because cadence/availability depends on your Vercel plan. If quotes become older than `QUOTE_MAX_AGE_SECONDS` (default 15 minutes), trades fail closed with `503 quote_stale` until refreshed.
+Seed creates a demo active season, AAPL/MSFT/NVDA/TSLA/GOOGL and simulated quotes/history. It is not real market data. The quote refresh endpoint makes a bounded random walk and writes prices/history atomically. `vercel.json` schedules `GET /api/market/refresh` every 10 minutes. Vercel Cron sends `Authorization: Bearer <CRON_SECRET>` when that env var is set; a manual scheduler can `POST` the same path. Hobby plans only allow a daily cron, so `.github/workflows/market-refresh.yml` can POST the endpoint every 10 minutes when the `APP_URL` and `CRON_SECRET` repository secrets are set. A trade whose quote is older than `QUOTE_MAX_AGE_SECONDS` (default 15 minutes) also refreshes the simulated book once and retries before returning `503 quote_stale`.
 
 For a deployed Supabase project, link it and apply with `npx supabase link --project-ref <ref>` then `npx supabase db push`. Review `supabase/migrations/` before production use and provision seasons/assets through an administrative deployment process. Mark seasons active only when their dates/status are valid.
 
@@ -76,19 +77,19 @@ Auth: required. Body (strict; extra fields rejected):
 { "data": { "trade_id":"<uuid>", "symbol":"AAPL", "side":"buy", "quantity":2.5, "unit_price":227.52, "total":568.8, "cash_balance":99431.2, "duplicate":false, "quote":{"price":"227.520000","quotedAt":"...","source":"simulated"} } }
 ```
 
-A successful retry returns the original trade ID/price and `duplicate:true`; current cash balance is included. Errors: `400 invalid_request|invalid_quantity|invalid_side`, `401 unauthorized`, `404 asset_not_found|quote_unavailable`, `409 insufficient_cash|insufficient_shares|season_unavailable|idempotency_conflict`, `503 quote_stale`, `500 internal_error|trade_failed`. Never display a locally computed price as the final execution price; use the returned quote/trade values.
+A successful retry returns the original trade ID/price and `duplicate:true`; current cash balance is included. Errors: `400 invalid_request|invalid_quantity|invalid_side|invalid_total|below_minimum_notional|idempotency_key_required`, `401 unauthorized`, `403 forbidden`, `404 asset_not_found|quote_unavailable`, `409 insufficient_cash|insufficient_shares|season_unavailable|idempotency_conflict`, `503 quote_stale`, `500 internal_error|trade_failed`. Never display a locally computed price as the final execution price; use the returned quote/trade values.
 
 ### `GET /api/seasons/leaderboard?seasonId=<uuid>`
 
-Auth: required. Response `200`: `{ "data": [{ "user_id":"<uuid>", "display_name":"Trader", "portfolio_value":100000, "rank":1 }] }`. The ranking is computed from current cash plus latest asset quotes. Errors: `400 invalid_request`, `401 unauthorized`, `500 leaderboard_unavailable`.
+Auth: required. Response `200`: `{ "data": [{ "display_name":"Trader", "portfolio_value":100000, "rank":1, "is_you":true, "player_count":42 }] }`. The ranking is computed from current cash plus latest asset quotes. Rows do not include user ids. Results are limited to the top 100, plus the caller and the rank immediately ahead of them, and only for an active or completed season the caller has joined. Errors: `400 invalid_request`, `401 unauthorized`, `500 leaderboard_unavailable`.
 
 ### `POST /api/market/refresh`
 
-Machine-only; not a user endpoint. Requires `Authorization: Bearer <CRON_SECRET>`. Refreshes all seeded quote rows and appends price history. Returns count and timestamp. Replace its simulated-random-walk logic with a trusted market-data adapter when going live.
+Machine-only; not a user endpoint. `GET` (Vercel Cron) or `POST`. Requires `Authorization: Bearer <CRON_SECRET>` with any bearer casing. Refreshes quote rows and appends price history. Returns count and timestamp. Replace its simulated-random-walk logic with a trusted market-data adapter when going live.
 
 ### Direct Supabase reads
 
-The browser can use RLS-protected `select` on `profiles` (self only), `portfolios`, `cash_balances`, `holdings`, `trades`, and `transactions` (own portfolio only); public authenticated reads include `seasons`, active `assets`, quotes/history, and participant season data. Writes to all financial/market tables are denied to `anon` and `authenticated`; do not implement client-side balance or position updates.
+The browser can use RLS-protected `select` on `profiles` (self only), `portfolios`, `cash_balances`, `holdings`, `trades`, and `transactions` (own portfolio only); public authenticated reads include `seasons`, active `assets` (and inactive assets the caller still holds), quotes/history, and participant season data. Writes to all financial/market tables are denied to `anon` and `authenticated`; do not implement client-side balance or position updates.
 
 ## Validation and errors
 

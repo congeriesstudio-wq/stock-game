@@ -1,11 +1,5 @@
 {
   "functions": {
     "api/**/*.ts": { "maxDuration": 15 }
-  },
-  "crons": [
-    {
-      "path": "/api/market/refresh",
-      "schedule": "*/10 * * * *"
-    }
-  ]
+  }
 }

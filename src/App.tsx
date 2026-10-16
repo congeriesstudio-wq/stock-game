@@ -8,11 +8,14 @@ import type { GameState, Holding, Player, PortfolioMetrics, Stock, Trade } from 
 
 const api = isLive ? liveApi : mockApi;
 import { PortfolioChart, StockChart } from './components/Charts';
+import { ExperimentsProvider, useExperiments } from './experiments/ExperimentsProvider';
 import './styles.css';
 import './landing.css';
 import './error-state.css';
 
 type View = 'overview' | 'portfolio' | 'markets' | 'leaderboard';
+const BUILTIN_VIEWS: View[] = ['overview', 'portfolio', 'markets', 'leaderboard'];
+const VIEW_TITLE: Record<View, string> = { overview: 'Overview', portfolio: 'Portfolio', markets: 'Explore markets', leaderboard: 'Leaderboard' };
 type Notice = { type: 'success' | 'error' | 'info'; text: string };
 const money = (value: number) => `${value < 0 ? '-' : ''}$${Math.abs(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const shortMoney = (value: number) => `${value < 0 ? '-' : ''}$${Math.abs(Math.round(value)).toLocaleString('en-US')}`;
@@ -36,8 +39,9 @@ function PriceChange({ value, compact = false }: { value: number; compact?: bool
 function Skeleton({ className = '' }: { className?: string }) { return <div className={`skeleton ${className}`} aria-label="Loading"/>; }
 function Toast({ notice, close }: { notice: Notice; close: () => void }) { return <div className={`toast ${notice.type}`} role="status"><span className="toast-icon">{notice.type === 'success' ? <Check size={16}/> : notice.type === 'error' ? <X size={16}/> : <Sparkles size={16}/>}</span>{notice.text}<button aria-label="Dismiss notification" onClick={close}><X size={15}/></button></div>; }
 
-function App() {
-  const [view, setView] = useState<View>('overview');
+function GameApp() {
+  const { enabledTabs } = useExperiments();
+  const [view, setView] = useState<string>('overview');
   const [stocks, setStocks] = useState<Stock[]>([]);
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [trades, setTrades] = useState<Trade[]>([]);
@@ -142,7 +146,11 @@ function App() {
   const totalReturnPct = portfolioMetrics.totalReturnPct;
   const dailyPL = portfolioMetrics.dailyGainLoss;
   const filterStocks = (term: string) => stocks.filter(s => `${s.symbol} ${s.name}`.toLowerCase().includes(term.toLowerCase()));
-  const showPage = (next: View) => { setView(next); setMobileNav(false); setQuery(''); };
+  const showPage = (next: string) => { setView(next); setMobileNav(false); setQuery(''); };
+  useEffect(() => {
+    if (BUILTIN_VIEWS.includes(view as View)) return;
+    if (!enabledTabs.some(tab => tab.id === view)) setView('overview');
+  }, [enabledTabs, view]);
   const toggleWatch = (symbol: string) => { const already = watchlist.includes(symbol); setWatchlist(old => already ? old.filter(s => s !== symbol) : [...old, symbol]); setNotice({ type: 'success', text: already ? `${symbol} removed from watchlist` : `${symbol} added to watchlist` }); };
   const executeTrade = async (side: 'buy' | 'sell', quantity: number, symbol: string, idempotencyKey: string) => {
     const result = await api.submitTrade({ symbol, side, quantity, idempotencyKey });
@@ -152,6 +160,8 @@ function App() {
 
   const market = marketCopy(gameState);
   const playerName = firstNameOf(user.name);
+  const activeExperiment = enabledTabs.find(tab => tab.id === view);
+  const viewTitle = VIEW_TITLE[view as View] ?? activeExperiment?.label ?? 'Overview';
   if (!sessionReady) return <div className="auth-screen" aria-busy="true"/>;
   if (!loggedIn) return authStage === 'landing' ? <LandingPage onSignup={() => { setAuthMode('signup'); setAuthStage('form'); }} onLogin={() => { setAuthMode('login'); setAuthStage('form'); }} /> : <AuthScreen mode={authMode} setMode={setAuthMode} onBack={() => setAuthStage('landing')} onAuth={authenticate} />;
   return <div className="app-shell">
@@ -165,13 +175,15 @@ function App() {
         <NavItem icon={<Wallet size={18}/>} label="Portfolio" active={view==='portfolio'} onClick={() => showPage('portfolio')} badge={String(holdings.length)}/>
         <NavItem icon={<Compass size={18}/>} label="Explore markets" active={view==='markets'} onClick={() => showPage('markets')}/>
         <NavItem icon={<Trophy size={18}/>} label="Leaderboard" active={view==='leaderboard'} onClick={() => showPage('leaderboard')}/>
+        {enabledTabs.length > 0 && <div className="nav-label">EXPERIMENTS</div>}
+        {enabledTabs.map(tab => <NavItem key={tab.id} icon={tab.icon ?? <Sparkles size={18}/>} label={tab.label} active={view===tab.id} onClick={() => showPage(tab.id)}/>)}
       </nav>
       <div className="nav-label tools-label">YOUR GAME</div>
       <div className="game-mini-card"><div className="game-mini-icon"><Gem size={16}/></div><div className="game-mini-copy"><b>Trading streak</b><span>{gameState?.streakDays ?? '—'} days in a row</span></div><span className="streak">🔥 {gameState?.streakDays ?? '—'}</span></div>
       <div className="sidebar-bottom"><button className="help-link"><CircleHelp size={17}/> Help & how to play <ArrowUpRight size={13}/></button><div className="sidebar-user"><div className="avatar avatar-purple">{initialsOf(user.name)}</div><div className="user-copy"><b>{user.name}</b><span>Level {gameState?.playerLevel ?? '—'} · {gameState?.playerTitle ?? 'Trader'}</span></div><button aria-label="Open profile menu" className="icon-btn sidebar-more" onClick={() => setUserMenu(!userMenu)}><MoreHorizontal size={18}/></button></div></div>
     </aside>
     <main className="main-shell">
-      <header className="topbar"><button className="icon-btn mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open navigation"><Menu size={20}/></button><div className="breadcrumb"><span>Workspace</span><ChevronRight size={14}/><b>{view === 'overview' ? 'Overview' : view === 'markets' ? 'Explore markets' : view === 'portfolio' ? 'Portfolio' : 'Leaderboard'}</b></div>
+      <header className="topbar"><button className="icon-btn mobile-menu" onClick={() => setMobileNav(true)} aria-label="Open navigation"><Menu size={20}/></button><div className="breadcrumb"><span>Workspace</span><ChevronRight size={14}/><b>{viewTitle}</b></div>
         <div className="topbar-actions"><div className="global-search"><Search size={16}/><input aria-label="Search stocks" placeholder="Search stocks..." value={query} onChange={e => setQuery(e.target.value)} onFocus={() => view !== 'markets' && setView('markets')}/><kbd><Command size={11}/> K</kbd>{query && <div className="search-dropdown">{filterStocks(query).length ? filterStocks(query).slice(0,5).map(s=><button key={s.symbol} onClick={()=>{setActiveStock(s.symbol);setQuery('');setView('markets')}}><StockAvatar stock={s}/><span><b>{s.symbol}</b><small>{s.name}</small></span><strong>{money(s.price)}</strong></button>) : <div className="search-empty">No stocks found</div>}</div>}</div><div className="market-status"><span className="live-dot"/> {market.headline}</div><button className="icon-btn notification-btn" aria-label="Notifications"><Bell size={18}/><i/></button><div className="top-avatar-wrap"><button className="top-avatar avatar avatar-purple" aria-label="Account menu" onClick={()=>setUserMenu(!userMenu)}>{initialsOf(user.name)}</button>{userMenu && <div className="user-dropdown"><b>{user.name}</b><span>{user.email}</span><hr/><button onClick={() => void signOut()}><LogOut size={15}/> Log out</button></div>}</div></div>
       </header>
       {query && view === 'markets' && <button className="search-dismiss" onClick={()=>setQuery('')} aria-label="Close search results"/>}
@@ -181,6 +193,7 @@ function App() {
         {view === 'portfolio' && <PortfolioPage loading={loading} value={portfolioValue} cash={cash} totalPL={totalPL} totalReturnPct={totalReturnPct} cashAllocationPct={portfolioMetrics.cashAllocationPct} investedValue={portfolioMetrics.investedValue} portfolioHistory={portfolioHistory} portfolioDates={portfolioDates} dailyPL={dailyPL} holdings={holdings} stockMap={stockBySymbol} onTrade={(s: Stock, side: 'buy'|'sell')=>setTradeTarget({stock:s,side})} onSelectStock={(s: string)=>{setActiveStock(s);setView('markets')}} onNavigate={showPage}/>}
         {view === 'markets' && <MarketsPage loading={loading} stocks={filterStocks(query)} query={query} setQuery={setQuery} activeStock={selectedStock} holdings={holdings} cash={cash} watchlist={watchlist} market={market} onSelect={(s: Stock)=>setActiveStock(s.symbol)} onTrade={(s: Stock, side: 'buy'|'sell')=>setTradeTarget({stock:s,side})} onWatch={toggleWatch}/>}
         {view === 'leaderboard' && <LeaderboardPage loading={loading} players={players} gameState={gameState} playerName={playerName}/>}
+        {activeExperiment?.render({ stocks, loading, onSelectStock: (symbol: string) => { setActiveStock(symbol); showPage('markets'); } })}
         </>}
       </section>
     </main>
@@ -300,4 +313,6 @@ function LandingPage({ onSignup, onLogin }: { onSignup:()=>void; onLogin:()=>voi
 
 function AuthScreen({ mode, setMode, onBack, onAuth }: { mode:'login'|'signup'; setMode:(m:'login'|'signup')=>void; onBack:()=>void; onAuth:(mode:'login'|'signup',email:string,password:string,name:string)=>Promise<string|null> }) { const [showPassword,setShowPassword]=useState(false); const [email,setEmail]=useState(''); const [password,setPassword]=useState(''); const [name,setName]=useState(''); const [error,setError]=useState(''); const [busy,setBusy]=useState(false); const submit=async(e:React.FormEvent)=>{e.preventDefault();if(!email.trim()||!password||(mode==='signup'&&!name.trim())){setError('Please complete all required fields.');return;}if(password.length<8){setError('Password must be at least 8 characters.');return;}setError('');setBusy(true);try{const message=await onAuth(mode,email.trim(),password,name);if(message)setError(message)}catch{setError('Something went wrong. Please try again.')}finally{setBusy(false)}};return <div className="auth-screen"><div className="auth-left"><div className="brand auth-brand"><div className="brand-mark"><Activity size={18}/></div><span>ticker<span className="brand-dot">.</span><b>arena</b></span></div><div className="auth-promo"><span className="eyebrow"><span className="live-dot"/> A SEASON IS LIVE</span><h1>The market<br/>is your <em>arena.</em></h1><p>Build your portfolio. Outplay the market. Climb the leaderboard.</p><div className="promo-stats"><div><b>Free</b><span>to play</span></div><div><b>Live</b><span>ranked seasons</span></div></div></div><div className="auth-quote"><span>“</span><p>It's the most fun I've had learning how the market works. Every day feels like game day.</p><small>— Alex R. · Season 03 finalist</small></div><div className="auth-dots"><i/><i/><i/></div></div><div className="auth-right"><button className="auth-mobile-brand" onClick={onBack}><div className="brand-mark"><Activity size={17}/></div> ticker<span>.</span>arena</button><button className="auth-back" onClick={onBack}>← Back to home</button><div className="auth-form-wrap"><div className="auth-form-heading"><div className="auth-icon"><Zap size={19}/></div><h2>{mode==='signup'?'Create your account':'Welcome back'}</h2><p>{mode==='signup'?'Start trading the market without risking a cent.':'Pick up where you left off in the Arena.'}</p></div><form onSubmit={submit} noValidate>{mode==='signup'&&<label>Display name<div className="auth-input"><input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Jordan Davis" autoComplete="name"/></div></label>}<label>Email address<div className="auth-input"><input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email"/></div></label><label>Password<div className="auth-input"><input type={showPassword?'text':'password'} value={password} onChange={e=>setPassword(e.target.value)} placeholder="At least 8 characters" autoComplete={mode==='signup'?'new-password':'current-password'}/><button type="button" onClick={()=>setShowPassword(!showPassword)} aria-label={showPassword?'Hide password':'Show password'}>{showPassword?<EyeOff size={16}/>:<Eye size={16}/>}</button></div></label>{mode==='login'&&<button type="button" className="forgot-button">Forgot password?</button>}{error&&<div className="form-error">{error}</div>}<button className="button-primary auth-submit" type="submit" disabled={busy}>{busy?'Just a sec…':mode==='signup'?'Create free account':'Log in'}<ArrowRight size={16}/></button></form><div className="auth-switch">{mode==='signup'?'Already playing?':'New to Ticker Arena?'} <button onClick={()=>{setMode(mode==='signup'?'login':'signup');setError('')}}>{mode==='signup'?'Log in':'Create an account'}</button></div><div className="auth-legal">By continuing, you agree to our <a href="#terms">Terms</a> and <a href="#privacy">Privacy Policy</a>.</div><div className="auth-trust"><ShieldCheck size={14}/> 100% free · No real money · Just for fun</div></div></div></div> }
 
-export default App;
+export default function App() {
+  return <ExperimentsProvider><GameApp /></ExperimentsProvider>;
+}

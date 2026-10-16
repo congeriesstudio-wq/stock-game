@@ -13,4 +13,4 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           test -n "$APP_URL" && test -n "$CRON_SECRET" || { echo "Set APP_URL and CRON_SECRET repository secrets"; exit 1; }
-          curl --fail-with-body -sS -X POST "$APP_URL/api/market/refresh" -H "Authorization: ******"
+          curl --fail-with-body -sS -X POST "$APP_URL/api/market/refresh" -H "Authorization: Bearer $CRON_SECRET"

@@ -9,7 +9,7 @@ function required(name: string): string {
 export function createUserClient(accessToken: string): SupabaseClient {
   return createClient(required('SUPABASE_URL'), required('SUPABASE_ANON_KEY'), {
     auth: { persistSession: false, autoRefreshToken: false },
-    global: { headers: { Authorization: `Bearer ${accessToken}` } },
+    global: { headers: { Authorization: 'Bearer ' + accessToken } },
   });
 }
 

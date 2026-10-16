@@ -1,4 +1,4 @@
-import type { GameState, Holding, Player, PortfolioMetrics, Stock, Trade, TradeRequest, TradeResult } from '../types';
+import type { GameState, Holding, Player, PortfolioMetrics, Stock, Trade, TradeRequest, TradeResult } from '../types.js';
 
 // Development adapter only. Replace this module with typed fetch/server-action calls when the API is ready.
 // Never treat client-calculated estimates as authoritative; trade() is the only source of transaction outcomes.

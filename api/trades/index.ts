@@ -3,6 +3,7 @@ import { authenticate, json, mapDatabaseError, methodNotAllowed } from '../../sr
 import { createAdminClient } from '../../src/lib/server-auth.js';
 import { tradeRequestSchema } from '../../src/lib/validation.js';
 import { SupabaseQuoteProvider } from '../../src/prices/provider.js';
+import { refreshSimulatedQuotes } from '../../src/prices/refresh.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);
@@ -19,12 +20,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const admin = createAdminClient();
     const maxAge = Number(process.env.QUOTE_MAX_AGE_SECONDS ?? 900);
     const prices = new SupabaseQuoteProvider(admin, Number.isFinite(maxAge) ? maxAge : 900);
-    let quote;
+    let quote: Awaited<ReturnType<typeof prices.getCurrentPrice>> | undefined;
+    let quoteError = 'quote_unavailable';
     try {
       quote = await prices.getCurrentPrice(input.symbol);
     } catch (error) {
-      const reason = error instanceof Error ? error.message : 'quote_unavailable';
-      const stale = reason === 'quote_stale';
+      quoteError = error instanceof Error ? error.message : 'quote_unavailable';
+      if (quoteError === 'quote_stale') {
+        const refreshed = await refreshSimulatedQuotes(admin);
+        if (refreshed.ok) {
+          try { quote = await prices.getCurrentPrice(input.symbol); } catch { quote = undefined; }
+        }
+      }
+    }
+    if (!quote) {
+      const stale = quoteError === 'quote_stale';
       return json(res, stale ? 503 : 404, { error: {
         code: stale ? 'quote_stale' : 'quote_unavailable',
         message: stale ? 'The latest market quote is too old. Retry after the price feed updates.' : 'No current quote is available for this asset.',

@@ -7,9 +7,15 @@ export function json(res: VercelResponse, status: number, body: unknown) {
   return res.status(status).json(body);
 }
 
+export function bearerToken(authorization: string | undefined): string {
+  if (!authorization) return '';
+  const match = /^Bearer\s+(\S+)/i.exec(authorization.trim());
+  return match?.[1] ?? '';
+}
+
 export async function authenticate(req: VercelRequest, res: VercelResponse) {
-  const header = req.headers.authorization;
-  const token = header?.startsWith('Bearer ') ? header.slice(7).trim() : '';
+  const header = typeof req.headers.authorization === 'string' ? req.headers.authorization : undefined;
+  const token = bearerToken(header);
   if (!token) {
     json(res, 401, { error: { code: 'unauthorized', message: 'A valid bearer access token is required.' } });
     return null;
@@ -41,6 +47,9 @@ export function mapDatabaseError(message: string, code?: string) {
     portfolio_not_found_or_season_closed: [409, 'season_unavailable'],
     season_not_active: [409, 'season_unavailable'],
     idempotency_conflict: [409, 'idempotency_conflict'],
+    idempotency_key_required: [400, 'idempotency_key_required'],
+    forbidden: [403, 'forbidden'],
+    below_minimum_notional: [400, 'below_minimum_notional'],
     invalid_side: [400, 'invalid_side'],
     invalid_quantity: [400, 'invalid_quantity'],
     invalid_price: [400, 'invalid_price'],
